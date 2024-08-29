@@ -151,9 +151,9 @@ import streamlit as st
 # Barre latérale pour les paramètres
 st.sidebar.title("Parameters")
 api_key = st.sidebar.text_input("API Key")
-location = st.sidebar.selectbox("Location", ["United States", "France", "United Kingdom", "Spain", "Italy"])
-language = st.sidebar.selectbox("Language", ["en", "fr", "uk", "es", "it"])
-google_domain = st.sidebar.selectbox("Google Domain", ["google.com", "google.fr", "google.co.uk", "google.es", "google.it"])
+location = st.sidebar.selectbox("Location", ["France", "United States", "United Kingdom", "Spain", "Italy"])
+language = st.sidebar.selectbox("Language", ["fr", "en", "uk", "es", "it"])
+google_domain = st.sidebar.selectbox("Google Domain", ["google.fr", "google.com", "google.co.uk", "google.es", "google.it"])
 device = st.sidebar.selectbox("Device", ["desktop", "mobile"])
 
 # Partie principale pour les mots-clés
