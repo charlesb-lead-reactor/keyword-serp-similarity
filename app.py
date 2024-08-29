@@ -150,7 +150,7 @@ import streamlit as st
 
 # Barre latérale pour les paramètres
 st.sidebar.title("Parameters")
-api_key = st.sidebar.text_input("API Key")
+api_key = st.sidebar.text_input("API Key (SERPAPI)")
 location = st.sidebar.selectbox("Location", ["France", "United States", "United Kingdom", "Spain", "Italy"])
 language = st.sidebar.selectbox("Language", ["fr", "en", "uk", "es", "it"])
 google_domain = st.sidebar.selectbox("Google Domain", ["google.fr", "google.com", "google.co.uk", "google.es", "google.it"])
