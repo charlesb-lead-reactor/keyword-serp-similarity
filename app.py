@@ -27,28 +27,22 @@ def load_serp_results(hash_key, directory='serp_cache'):
             return pickle.load(file)
     return None
 
+
 def calculate_serp_similarity(serp_results):
-    """
-    Calcule la similarité des listes de résultats SERP pour chaque mot-clé.
-
-    Parameters:
-    serp_results (list of list of str): Liste des listes de domaines/URLs des résultats SERP pour chaque mot-clé.
-
-    Returns:
-    list of list of int: Matrice de pourcentages de similarité pour chaque paire de mots-clés.
-    """
     num_keywords = len(serp_results)
     similarity_matrix = [[0] * num_keywords for _ in range(num_keywords)]
-
-    for i, current_serp in enumerate(serp_results):
-        for j, other_serp in enumerate(serp_results):
-            if i != j:
-                # Utilise difflib.SequenceMatcher pour calculer la similarité
-                sequence_matcher = difflib.SequenceMatcher(None, current_serp, other_serp)
-                similarity_matrix[i][j] = int(round(sequence_matcher.ratio() * 100))
-            else:
+    
+    for i in range(num_keywords):
+        for j in range(i, num_keywords):  # Changement ici
+            if i == j:
                 similarity_matrix[i][j] = 100  # Similarité maximale avec soi-même
-
+            else:
+                # Utilise difflib.SequenceMatcher pour calculer la similarité
+                sequence_matcher = difflib.SequenceMatcher(None, serp_results[i], serp_results[j])
+                similarity = int(round(sequence_matcher.ratio() * 100))
+                similarity_matrix[i][j] = similarity
+                similarity_matrix[j][i] = similarity  # Symétrie assurée
+    
     return similarity_matrix
 
 def cluster_keywords(similarity_matrix, keywords, threshold=40):
@@ -72,35 +66,9 @@ def cluster_keywords(similarity_matrix, keywords, threshold=40):
 
     return clusters
 
-def extract_domains_from_serp(results, include_path=False):
-    """
-    Extrait les domaines ou les URLs complètes des résultats de recherche organiques.
 
-    Parameters:
-    results (dict): JSON des résultats de recherche contenant les résultats organiques.
-    include_path (bool): Si True, inclut le chemin complet de l'URL dans l'extraction.
-
-    Returns:
-    list of str: Liste des domaines ou URLs extraits des résultats de recherche.
-    """
-    extracted_items = []
-
-    for result in results.get("organic_results", []):
-        link = result.get("link")
-        
-        if link:
-            try:
-                ext = tldextract.extract(link)
-                if include_path:
-                    extracted_items.append(link)
-                else:
-                    domain = f"{ext.domain}.{ext.suffix}"
-                    extracted_items.append(domain)
-            except Exception as e:
-                print(f"Erreur lors de l'extraction du lien {link}: {e}")
-                continue
-
-    return extracted_items
+def extract_urls_from_serp(results):
+    return [result.get("link") for result in results.get("organic_results", []) if result.get("link")]
 
 def fetch_serp_results(api_key, query, location="United States", language="en", country="us", 
                        google_domain="google.com", device="desktop", num_results=15, **additional_params):
@@ -145,6 +113,36 @@ def fetch_serp_results(api_key, query, location="United States", language="en", 
         # Gestion des erreurs et journalisation
         logging.error(f"Erreur lors de l'appel à l'API SERP pour la requête '{query}': {e}")
         return None
+    
+def cluster_and_sort_keywords(similarity_matrix, keywords, threshold=20):
+    n = len(keywords)
+    unclustered = set(range(n))
+    clusters = []
+    sorted_keywords = []
+    
+    while unclustered:
+        # Trouver le mot-clé avec la plus grande somme de similarité parmi les non clusterisés
+        main_keyword_index = max(unclustered, key=lambda i: sum(similarity_matrix[i][j] for j in unclustered))
+        
+        # Créer un nouveau cluster
+        cluster = [main_keyword_index]
+        for j in unclustered:
+            if j != main_keyword_index and similarity_matrix[main_keyword_index][j] >= threshold:
+                cluster.append(j)
+        
+        # Trier le cluster par similarité décroissante avec le mot-clé principal
+        cluster.sort(key=lambda i: similarity_matrix[main_keyword_index][i], reverse=True)
+        
+        # Ajouter le cluster à la liste des clusters
+        clusters.append([keywords[i] for i in cluster])
+        
+        # Mettre à jour la liste des mots-clés triés
+        sorted_keywords.extend([keywords[i] for i in cluster])
+        
+        # Retirer les mots-clés clusterisés de l'ensemble des non clusterisés
+        unclustered -= set(cluster)
+    
+    return sorted_keywords, clusters
 
 import streamlit as st
 
@@ -172,41 +170,52 @@ if st.button("Fetch SERP Results"):
             "Italy": "it"
         }
         country = country_mapping[location]
-
         keywords = [kw.strip() for kw in query.split('\n') if kw.strip()]
         keywords_hash = generate_keywords_hash(keywords)
-        st.write("keywords hash : " + keywords_hash)
-
-        serp_comp_list = load_serp_results(keywords_hash)
-        if serp_comp_list is None:
-            serp_comp_list = []
+        
+        serp_results = load_serp_results(keywords_hash)
+        
+        if serp_results is None:
+            serp_results = {}
             for keyword in keywords:
                 results = fetch_serp_results(api_key, keyword, location=location, language=language, country=country, google_domain=google_domain, device=device)
-                if not results:
-                    st.write(f"Failed to fetch results for keyword: {keyword}")
+                if results:
+                    serp_results[keyword] = extract_urls_from_serp(results)
                 else:
-                    serp_comp = extract_domains_from_serp(results)
-                    serp_comp_list.append(serp_comp)
-
-            save_serp_results(keywords_hash, serp_comp_list)
-
-        if not serp_comp_list:
-            st.write("Failed to fetch any SERP results.")
+                    st.write(f"Failed to fetch results for keyword: {keyword}")
+            
+            save_serp_results(keywords_hash, serp_results)
         
-        else:
+        if serp_results:
+            # Créer le DataFrame des URLs
+            max_urls = max(len(urls) for urls in serp_results.values())
+            df_urls = pd.DataFrame({k: urls + [None]*(max_urls - len(urls)) for k, urls in serp_results.items()})
+            
+            # Afficher le DataFrame des URLs
+            st.write("SERP Results (URLs):")
+            st.dataframe(df_urls)
+            
+            # Calculer et afficher la matrice de similarité
+            serp_comp_list = list(serp_results.values())
             similarity_matrix = calculate_serp_similarity(serp_comp_list)
             
-            df = pd.DataFrame(similarity_matrix, index=keywords, columns=keywords)
-
+            # Clusteriser et trier les mots-clés
+            sorted_keywords, clusters = cluster_and_sort_keywords(similarity_matrix, keywords)
+            
+            # Réorganiser la matrice de similarité
+            sorted_matrix = [[similarity_matrix[keywords.index(k1)][keywords.index(k2)] for k2 in sorted_keywords] for k1 in sorted_keywords]
+            
+            # Créer le DataFrame trié
+            df_similarity = pd.DataFrame(sorted_matrix, index=sorted_keywords, columns=sorted_keywords)
             cm = sns.light_palette("green", as_cmap=True)
-            df_styled = df.style.background_gradient(cmap=cm)
-
-            st.write("Keyword Similarity Matrix:")
+            df_styled = df_similarity.style.background_gradient(cmap=cm)
+            
+            st.write("Keyword Similarity Matrix (clustered and sorted):")
             st.dataframe(df_styled)
-
-            # Clusterisation hiérarchique
-            clusters = cluster_keywords(similarity_matrix, keywords)
-
+            
+            # Afficher les clusters
             st.write("Clusters de mots-clés :")
             for i, cluster in enumerate(clusters, 1):
-                st.write(f"Cluster {i}: {', '.join(cluster)}")            
+                st.write(f"Cluster {i}: {', '.join(cluster)}")
+        else:
+            st.write("Failed to fetch any SERP results.")
