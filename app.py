@@ -3,11 +3,9 @@ import hashlib
 import pickle
 import os
 import pandas as pd
-from serpapi import GoogleSearch
 import difflib
-import tldextract
-import logging
 import seaborn as sns
+from googleapiclient.discovery import build
 
 def generate_keywords_hash(keywords):
     keywords_string = ' '.join(sorted(keywords)).encode()
@@ -27,93 +25,51 @@ def load_serp_results(hash_key, directory='serp_cache'):
             return pickle.load(file)
     return None
 
-
 def calculate_serp_similarity(serp_results):
     num_keywords = len(serp_results)
     similarity_matrix = [[0] * num_keywords for _ in range(num_keywords)]
-    
     for i in range(num_keywords):
-        for j in range(i, num_keywords):  # Changement ici
+        for j in range(i, num_keywords):
             if i == j:
-                similarity_matrix[i][j] = 100  # Similarité maximale avec soi-même
+                similarity_matrix[i][j] = 100
             else:
-                # Utilise difflib.SequenceMatcher pour calculer la similarité
                 sequence_matcher = difflib.SequenceMatcher(None, serp_results[i], serp_results[j])
                 similarity = int(round(sequence_matcher.ratio() * 100))
                 similarity_matrix[i][j] = similarity
-                similarity_matrix[j][i] = similarity  # Symétrie assurée
-    
+                similarity_matrix[j][i] = similarity
     return similarity_matrix
 
-def cluster_keywords(similarity_matrix, keywords, threshold=40):
-    clusters = []
-    used_keywords = set()
-
-    for i, keyword in enumerate(keywords):
-        if keyword in used_keywords:
-            continue
-        
-        cluster = [keyword]
-        used_keywords.add(keyword)
-
-        for j, other_keyword in enumerate(keywords):
-            if other_keyword != keyword and other_keyword not in used_keywords:
-                if similarity_matrix[i][j] > threshold:
-                    cluster.append(other_keyword)
-                    used_keywords.add(other_keyword)
-        
-        clusters.append(cluster)
-
-    return clusters
-
-
-def extract_urls_from_serp(results):
-    return [result.get("link") for result in results.get("organic_results", []) if result.get("link")]
-
-def fetch_serp_results(api_key, query, location="United States", language="en", country="us", 
-                       google_domain="google.com", device="desktop", num_results=15, **additional_params):
-    """
-    Appelle l'API SERP pour obtenir les résultats de recherche pour un mot-clé donné.
-
-    Parameters:
-    api_key (str): La clé API pour authentifier la requête.
-    query (str): Le mot-clé pour lequel effectuer la recherche.
-    location (str): La localisation géographique des résultats de recherche (par défaut: "United States").
-    language (str): La langue des résultats de recherche (par défaut: "en").
-    country (str): Le paramètre de localisation de Google (par défaut: "us").
-    google_domain (str): Le domaine de Google à utiliser pour la recherche (par défaut: "google.com").
-    device (str): Le type de dispositif pour la recherche (par défaut: "desktop").
-    num_results (int): Le nombre de résultats de recherche organiques à récupérer (par défaut: 9).
-    **additional_params: Paramètres supplémentaires à passer à l'API.
-
-    Returns:
-    dict: Les résultats de recherche au format JSON, ou None en cas d'erreur.
-    """
-    # Définition des paramètres de recherche
-    params = {
-        "q": query,
-        "location": location,
-        "hl": language,
-        "gl": country,
-        "google_domain": google_domain,
-        "device": device,
-        "num": str(num_results),
-        "api_key": api_key
-    }
-
-    # Ajout des paramètres supplémentaires
-    params.update(additional_params)
-
+def fetch_google_results(api_key, cse_id, query, num_results=10):
+    service = build("customsearch", "v1", developerKey=api_key)
     try:
-        # Création de l'objet de recherche et récupération des résultats
-        search = GoogleSearch(params)
-        results = search.get_dict()
-        return results
+        result = service.cse().list(q=query, cx=cse_id, num=num_results).execute()
+        return result.get('items', [])
     except Exception as e:
-        # Gestion des erreurs et journalisation
-        logging.error(f"Erreur lors de l'appel à l'API SERP pour la requête '{query}': {e}")
+        st.error(f"Error fetching results for '{query}': {str(e)}")
         return None
-    
+
+def extract_urls_from_google(results):
+    return [item['link'] for item in results if 'link' in item]
+
+'''
+def cluster_and_sort_keywords(similarity_matrix, keywords, threshold=20):
+    n = len(keywords)
+    unclustered = set(range(n))
+    clusters = []
+    sorted_keywords = []
+    while unclustered:
+        main_keyword_index = max(unclustered, key=lambda i: sum(similarity_matrix[i][j] for j in unclustered))
+        cluster = [main_keyword_index]
+        for j in unclustered:
+            if j != main_keyword_index and similarity_matrix[main_keyword_index][j] >= threshold:
+                cluster.append(j)
+        cluster.sort(key=lambda i: similarity_matrix[main_keyword_index][i], reverse=True)
+        clusters.append([keywords[i] for i in cluster])
+        sorted_keywords.extend([keywords[i] for i in cluster])
+        unclustered -= set(cluster)
+    return sorted_keywords, clusters
+'''
+
 def cluster_and_sort_keywords(similarity_matrix, keywords, threshold=20):
     n = len(keywords)
     unclustered = set(range(n))
@@ -121,55 +77,43 @@ def cluster_and_sort_keywords(similarity_matrix, keywords, threshold=20):
     sorted_keywords = []
     
     while unclustered:
-        # Trouver le mot-clé avec la plus grande somme de similarité parmi les non clusterisés
         main_keyword_index = max(unclustered, key=lambda i: sum(similarity_matrix[i][j] for j in unclustered))
-        
-        # Créer un nouveau cluster
         cluster = [main_keyword_index]
+        
         for j in unclustered:
             if j != main_keyword_index and similarity_matrix[main_keyword_index][j] >= threshold:
                 cluster.append(j)
         
-        # Trier le cluster par similarité décroissante avec le mot-clé principal
-        cluster.sort(key=lambda i: similarity_matrix[main_keyword_index][i], reverse=True)
+        # Filtrer les mots-clés ayant une similarité de 0 avec au moins un autre mot-clé du cluster
+        filtered_cluster = []
+        for i in cluster:
+            if all(similarity_matrix[i][j] > 0 for j in cluster if i != j):
+                filtered_cluster.append(i)
         
-        # Ajouter le cluster à la liste des clusters
-        clusters.append([keywords[i] for i in cluster])
+        # Trier le cluster filtré en fonction de la similarité avec le mot-clé principal
+        filtered_cluster.sort(key=lambda i: similarity_matrix[main_keyword_index][i], reverse=True)
         
-        # Mettre à jour la liste des mots-clés triés
-        sorted_keywords.extend([keywords[i] for i in cluster])
+        if filtered_cluster:  # Ajouter le cluster seulement s'il n'est pas vide
+            clusters.append([keywords[i] for i in filtered_cluster])
+            sorted_keywords.extend([keywords[i] for i in filtered_cluster])
         
-        # Retirer les mots-clés clusterisés de l'ensemble des non clusterisés
-        unclustered -= set(cluster)
+        unclustered -= set(cluster)  # Retirer tous les mots-clés considérés, même ceux filtrés
     
     return sorted_keywords, clusters
 
-import streamlit as st
-
-# Barre latérale pour les paramètres
+# Streamlit UI
 st.sidebar.title("Parameters")
-api_key = st.sidebar.text_input("API Key (SERPAPI)")
-location = st.sidebar.selectbox("Location", ["France", "United States", "United Kingdom", "Spain", "Italy"])
-language = st.sidebar.selectbox("Language", ["fr", "en", "uk", "es", "it"])
-google_domain = st.sidebar.selectbox("Google Domain", ["google.fr", "google.com", "google.co.uk", "google.es", "google.it"])
-device = st.sidebar.selectbox("Device", ["desktop", "mobile"])
+api_key = st.sidebar.text_input("Google API Key", "AIzaSyCkebdoOTN3dkKS3Kpp3ghyNnU4uUFBqkk")
+cse_id = st.sidebar.text_input("Custom Search Engine ID", "75392133b2c1841ce")
+threshold = st.sidebar.number_input("Similarity Threshold", value=20)
 
-# Partie principale pour les mots-clés
-st.title("SERP Analysis Tool")
+st.title("Google Custom Search Analysis Tool")
 query = st.text_area("Keywords (one per line)", "International Business Machines Corporation\nIBM\nbig blue\nInternational Business Machines\nWatson")
 
-if st.button("Fetch SERP Results"):
-    if not api_key:
-        st.warning("Please provide the SERP API key in the sidebar to fetch results.")
+if st.button("Fetch Google Search Results"):
+    if not api_key or not cse_id:
+        st.warning("Please provide both the Google API key and Custom Search Engine ID in the sidebar.")
     else:
-        country_mapping = {
-            "United States": "us",
-            "France": "fr",
-            "United Kingdom": "uk",
-            "Spain": "es",
-            "Italy": "it"
-        }
-        country = country_mapping[location]
         keywords = [kw.strip() for kw in query.split('\n') if kw.strip()]
         keywords_hash = generate_keywords_hash(keywords)
         
@@ -178,34 +122,28 @@ if st.button("Fetch SERP Results"):
         if serp_results is None:
             serp_results = {}
             for keyword in keywords:
-                results = fetch_serp_results(api_key, keyword, location=location, language=language, country=country, google_domain=google_domain, device=device)
+                results = fetch_google_results(api_key, cse_id, keyword)
                 if results:
-                    serp_results[keyword] = extract_urls_from_serp(results)
+                    serp_results[keyword] = extract_urls_from_google(results)
                 else:
                     st.write(f"Failed to fetch results for keyword: {keyword}")
             
             save_serp_results(keywords_hash, serp_results)
         
         if serp_results:
-            # Créer le DataFrame des URLs
             max_urls = max(len(urls) for urls in serp_results.values())
             df_urls = pd.DataFrame({k: urls + [None]*(max_urls - len(urls)) for k, urls in serp_results.items()})
             
-            # Afficher le DataFrame des URLs
-            st.write("SERP Results (URLs):")
+            st.write("Google Search Results (URLs):")
             st.dataframe(df_urls)
             
-            # Calculer et afficher la matrice de similarité
             serp_comp_list = list(serp_results.values())
             similarity_matrix = calculate_serp_similarity(serp_comp_list)
             
-            # Clusteriser et trier les mots-clés
-            sorted_keywords, clusters = cluster_and_sort_keywords(similarity_matrix, keywords)
+            sorted_keywords, clusters = cluster_and_sort_keywords(similarity_matrix, keywords, threshold)
             
-            # Réorganiser la matrice de similarité
             sorted_matrix = [[similarity_matrix[keywords.index(k1)][keywords.index(k2)] for k2 in sorted_keywords] for k1 in sorted_keywords]
             
-            # Créer le DataFrame trié
             df_similarity = pd.DataFrame(sorted_matrix, index=sorted_keywords, columns=sorted_keywords)
             cm = sns.light_palette("green", as_cmap=True)
             df_styled = df_similarity.style.background_gradient(cmap=cm)
@@ -213,9 +151,8 @@ if st.button("Fetch SERP Results"):
             st.write("Keyword Similarity Matrix (clustered and sorted):")
             st.dataframe(df_styled)
             
-            # Afficher les clusters
-            st.write("Clusters de mots-clés :")
+            st.write("Keyword Clusters:")
             for i, cluster in enumerate(clusters, 1):
                 st.write(f"Cluster {i}: {', '.join(cluster)}")
         else:
-            st.write("Failed to fetch any SERP results.")
+            st.write("Failed to fetch any Google search results.")
