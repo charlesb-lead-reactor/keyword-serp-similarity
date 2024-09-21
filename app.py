@@ -28,7 +28,7 @@ def load_serp_results(hash_key, directory='serp_cache'):
 def calculate_serp_similarity(serp_results):
     num_keywords = len(serp_results)    
     similarity_matrix = [[0] * num_keywords for _ in range(num_keywords)]
-    for i in range(num_keywords):
+    for i in range(num_keywords):   
         for j in range(i, num_keywords):
             if i == j:
                 similarity_matrix[i][j] = 100
@@ -55,24 +55,6 @@ def fetch_google_results(api_key, cse_id, query, num_results=10):
 def extract_urls_from_google(results):
     return [item['link'] for item in results if 'link' in item]
 
-'''
-def cluster_and_sort_keywords(similarity_matrix, keywords, threshold=20):
-    n = len(keywords)
-    unclustered = set(range(n))
-    clusters = []
-    sorted_keywords = []
-    while unclustered:
-        main_keyword_index = max(unclustered, key=lambda i: sum(similarity_matrix[i][j] for j in unclustered))
-        cluster = [main_keyword_index]
-        for j in unclustered:
-            if j != main_keyword_index and similarity_matrix[main_keyword_index][j] >= threshold:
-                cluster.append(j)
-        cluster.sort(key=lambda i: similarity_matrix[main_keyword_index][i], reverse=True)
-        clusters.append([keywords[i] for i in cluster])
-        sorted_keywords.extend([keywords[i] for i in cluster])
-        unclustered -= set(cluster)
-    return sorted_keywords, clusters
-'''
 
 def cluster_and_sort_keywords(similarity_matrix, keywords, threshold=20):
     n = len(keywords)
@@ -167,30 +149,3 @@ if st.button("Fetch Google Search Results"):
         else:
             st.write("Failed to fetch any Google search results.")
 
-
-        # if serp_results:
-        #     max_urls = max(len(urls) for urls in serp_results.values())
-        #     df_urls = pd.DataFrame({k: urls + [None]*(max_urls - len(urls)) for k, urls in serp_results.items()})
-            
-        #     st.write("Google Search Results (URLs):")
-        #     st.dataframe(df_urls)
-            
-        #     serp_comp_list = list(serp_results.values())
-        #     similarity_matrix = calculate_serp_similarity(serp_comp_list)
-            
-        #     sorted_keywords, clusters = cluster_and_sort_keywords(similarity_matrix, keywords, threshold)
-            
-        #     sorted_matrix = [[similarity_matrix[keywords.index(k1)][keywords.index(k2)] for k2 in sorted_keywords] for k1 in sorted_keywords]
-            
-        #     df_similarity = pd.DataFrame(sorted_matrix, index=sorted_keywords, columns=sorted_keywords)
-        #     cm = sns.light_palette("green", as_cmap=True)
-        #     df_styled = df_similarity.style.background_gradient(cmap=cm)
-            
-        #     st.write("Keyword Similarity Matrix (clustered and sorted):")
-        #     st.dataframe(df_styled)
-            
-        #     st.write("Keyword Clusters:")
-        #     for i, cluster in enumerate(clusters, 1):
-        #         st.write(f"Cluster {i}: {', '.join(cluster)}")
-        # else:
-        #     st.write("Failed to fetch any Google search results.")
