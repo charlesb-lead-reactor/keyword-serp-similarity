@@ -1,0 +1,11 @@
+[flake8]
+max-line-length = 120
+exclude = .git,__pycache__,docs/source/conf.py,old,build,dist,env,venv
+#inline-quotes = single
+#multiline-quotes = single
+#docstring-quotes = double
+ignore = E501#, E203, E266, W503
+#E203 : Espace avant les deux points
+#E266 : Trop de dièses (#) pour un commentaire de bloc
+#E501 : Ligne trop longue
+#W503 : Opérateur de ligne en début de ligne

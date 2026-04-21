@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 .vscode/
 venv-keyword-serp-similarity/
+.streamlit/
 
 # C extensions
 *.so
